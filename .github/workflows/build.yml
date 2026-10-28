@@ -96,8 +96,10 @@ jobs:
           path: dist/*.apk
 
       # Never publish an APK that phones with the release installed could not update to.
+      # Skipped only in the template itself (Settings -> Template repository), which has no key and
+      # publishes nothing. A repository made from the template is not a template, so it is checked.
       - name: Check the release key is set up
-        if: github.ref == 'refs/heads/main' && env.SIGNED != 'true'
+        if: github.ref == 'refs/heads/main' && env.SIGNED != 'true' && github.event.repository.is_template != true
         run: |
           echo "::error::The signing secrets are missing, so nothing was published. See README -> Make it yours, step 3."
           exit 1
