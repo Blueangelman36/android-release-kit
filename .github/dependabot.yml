@@ -1,0 +1,21 @@
+# Weekly, grouped, so there is one pull request to merge rather than ten.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      kotlin:
+        # The Kotlin plugins and the Compose compiler move together; split, they fail to build.
+        patterns: ["org.jetbrains.kotlin*"]
+      everything-else:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

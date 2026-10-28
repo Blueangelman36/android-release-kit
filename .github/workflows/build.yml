@@ -1,0 +1,105 @@
+# Every push: tests and a build. Every push to main, with the signing secrets set: a signed APK
+# published to Releases, which the app's update check then offers to every installed copy.
+# README -> "Make it yours" has the one-time setup.
+
+name: Build APK
+
+# Push only, not pull_request as well: on a pull request from this repository both would run, and
+# a private repository's Actions minutes are worth not spending twice.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # publishing releases
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Run tests
+        run: ./gradlew testDebugUnitTest
+
+      # With the signing secrets: release APKs signed with the app's one key, the only kind ever
+      # published. Without them (Dependabot and forks can't read secrets): a debug APK, which
+      # proves the code builds and is never published.
+      - name: Build the app
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          name="${GITHUB_REPOSITORY#*/}"
+          if [ -n "$SIGNING_KEYSTORE_BASE64" ]; then
+            echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
+            export SIGNING_KEYSTORE_PATH="$RUNNER_TEMP/release.p12"
+            ./gradlew assembleRelease
+            rm -f "$RUNNER_TEMP/release.p12"
+            out=app/build/outputs/apk/release; kind=release
+            echo "SIGNED=true" >> "$GITHUB_ENV"
+          else
+            ./gradlew assembleDebug
+            out=app/build/outputs/apk/debug; kind=debug
+          fi
+          mkdir -p dist
+          cp "$out/app-universal-$kind.apk" "dist/$name.apk"
+          cp "$out/app-arm64-v8a-$kind.apk" "dist/$name-arm64.apk"
+          echo "APK=dist/$name.apk" >> "$GITHUB_ENV"
+
+      # The tag and release name are read from the APK itself, so they can't disagree with what is
+      # inside it. If they ever did, the update check would offer the same "update" forever.
+      - name: Read the version from the APK
+        run: |
+          AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          badging=$("$AAPT2" dump badging "$APK")
+          code=$(echo "$badging" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          name=$(echo "$badging" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)
+          label=$(echo "$badging" | sed -n "s/^application-label:'\(.*\)'$/\1/p" | head -1)
+          [ -n "$code" ] && [ -n "$name" ] || { echo "::error::could not read the version from $APK"; exit 1; }
+          echo "VERSION_CODE=$code" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$name" >> "$GITHUB_ENV"
+          echo "APP_LABEL=${label:-App}" >> "$GITHUB_ENV"
+          echo "versionCode $code, versionName $name, label ${label:-?}"
+
+      # A wrong key is otherwise invisible until a phone refuses the update.
+      - name: Show which key signed the APK
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs "$APK" | grep -E "certificate (DN|SHA-256)"
+          sha256sum dist/*.apk
+
+      - name: Upload APKs to this run
+        uses: actions/upload-artifact@v7
+        with:
+          name: apk
+          path: dist/*.apk
+
+      # Never publish an APK that phones with the release installed could not update to.
+      - name: Check the release key is set up
+        if: github.ref == 'refs/heads/main' && env.SIGNED != 'true'
+        run: |
+          echo "::error::The signing secrets are missing, so nothing was published. See README -> Make it yours, step 3."
+          exit 1
+
+      # Tagged build-<versionCode> because the in-app update check reads the number from the tag.
+      - name: Publish to Releases
+        if: github.ref == 'refs/heads/main' && env.SIGNED == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: build-${{ env.VERSION_CODE }}
+          name: ${{ env.APP_LABEL }} ${{ env.VERSION_NAME }}
+          body: >-
+            Open this page on your Android phone and tap the first APK below to install or update.
+            The -arm64 one is smaller and works on most phones from the last several years.
+          files: dist/*.apk
+          make_latest: true
