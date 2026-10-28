@@ -11,5 +11,11 @@
 .kotlin/
 *.apk
 *.aab
+# Signing keys and anything holding their passwords. Make keys outside this folder.
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.b64
+.env
+.env.*

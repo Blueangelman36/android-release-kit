@@ -19,6 +19,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This repository is public. A signing key committed here can never be taken back, so the
+      # build stops before anything else runs.
+      - name: No signing key or secrets file is committed
+        run: |
+          bad=$(git ls-files | grep -Ei '\.(p12|pfx|jks|keystore|pem|key|b64)$|(^|/)\.env(\..*)?$|(^|/)local\.properties$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::These files must not be in the repository: $bad"
+            echo "Remove them (git rm --cached <file>), then make a new key: this one has been published."
+            exit 1
+          fi
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
