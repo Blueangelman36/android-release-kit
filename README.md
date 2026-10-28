@@ -59,6 +59,10 @@ Then copy the key to the clipboard as text:
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("$HOME\Documents\my-app-release.p12")) | Set-Clipboard
 ```
 
+The key is made in your Documents folder on purpose: **never put it inside the repository
+folder**. This repository is public, and a key pushed here can't be taken back. The build
+refuses to run if one is committed, and `.gitignore` leaves `.p12` files out.
+
 **Back up `my-app-release.p12` and its password somewhere safe that isn't this repository**,
 such as a password manager. If you lose them, no phone can ever update the app again: every
 user has to uninstall it (losing its data) and install a new one.
